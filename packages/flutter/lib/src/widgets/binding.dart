@@ -492,13 +492,40 @@ mixin WidgetsBinding
       _debugShowWidgetInspectorOverrideNotifierObject ??= ValueNotifier<bool>(false);
   ValueNotifier<bool>? _debugShowWidgetInspectorOverrideNotifierObject;
 
+  /// The default behavior for taps in the app when the widget inspector is
+  /// enabled.
+  ///
+  /// - If true, taps in the app are intercepted by the widget inspector.
+  /// - If false, taps in the app are not intercepted by the widget inspector.
+  bool get debugWidgetInspectorDefaultTapBehaviorEnabled {
+    return debugWidgetInspectorDefaultTapBehaviorEnabledNotifier.value;
+  }
+
+  /// Sets the default behavior for taps in the app when the widget inspector is
+  /// enabled.
+  ///
+  /// See [debugWidgetInspectorDefaultTapBehaviorEnabled].
+  set debugWidgetInspectorDefaultTapBehaviorEnabled(bool value) {
+    debugWidgetInspectorDefaultTapBehaviorEnabledNotifier.value = value;
+  }
+
+  /// The notifier for the default behavior for taps in the app when the widget
+  /// inspector is enabled.
+  ///
+  /// See [debugWidgetInspectorDefaultTapBehaviorEnabled].
+  ValueNotifier<bool> get debugWidgetInspectorDefaultTapBehaviorEnabledNotifier =>
+      _debugWidgetInspectorDefaultTapBehaviorEnabledNotifierObject ??= ValueNotifier<bool>(true);
+  ValueNotifier<bool>? _debugWidgetInspectorDefaultTapBehaviorEnabledNotifierObject;
+
   @visibleForTesting
   @override
   void resetInternalState() {
     // ignore: invalid_use_of_visible_for_testing_member, https://github.com/dart-lang/sdk/issues/41998
     super.resetInternalState();
     _debugShowWidgetInspectorOverrideNotifierObject?.dispose();
+    _debugWidgetInspectorDefaultTapBehaviorEnabledNotifierObject?.dispose();
     _debugShowWidgetInspectorOverrideNotifierObject = null;
+    _debugWidgetInspectorDefaultTapBehaviorEnabledNotifierObject = null;
   }
 
   void _debugAddStackFilters() {

@@ -43,13 +43,29 @@ typedef ExitWidgetSelectionButtonBuilder =
     Widget Function(
       BuildContext context, {
       required VoidCallback onPressed,
+      required String semanticLabel,
       required GlobalKey key,
     });
 
 /// Signature for the builder callback used by
 /// [WidgetInspector.moveExitWidgetSelectionButtonBuilder].
 typedef MoveExitWidgetSelectionButtonBuilder =
-    Widget Function(BuildContext context, {required VoidCallback onPressed, bool isLeftAligned});
+    Widget Function(
+      BuildContext context, {
+      required VoidCallback onPressed,
+      required String semanticLabel,
+      bool isLeftAligned,
+    });
+
+/// Signature for the builder callback used by
+/// [WidgetInspector.tapBehaviorButtonBuilder].
+typedef TapBehaviorButtonBuilder =
+    Widget Function(
+      BuildContext context, {
+      required VoidCallback onPressed,
+      required String semanticLabel,
+      required bool defaultTapBehaviorEnabled,
+    });
 
 /// Signature for a method that registers the service extension `callback` with
 /// the given `name`.
@@ -2768,6 +2784,7 @@ class WidgetInspector extends StatefulWidget {
   const WidgetInspector({
     super.key,
     required this.child,
+    required this.tapBehaviorButtonBuilder,
     required this.exitWidgetSelectionButtonBuilder,
     required this.moveExitWidgetSelectionButtonBuilder,
   });
@@ -2790,6 +2807,15 @@ class WidgetInspector extends StatefulWidget {
   /// The button UI should respond to the `leftAligned` argument.
   final MoveExitWidgetSelectionButtonBuilder? moveExitWidgetSelectionButtonBuilder;
 
+  /// A builder that is called to create the button that changes the default tap
+  /// behavior when Select Widget mode is enabled.
+  ///
+  /// The `onPressed` callback passed as an argument to the builder should be
+  /// hooked up to the returned widget.
+  ///
+  /// The button UI should respond to the `defaultTapBehaviorEnabled` argument.
+  final TapBehaviorButtonBuilder? tapBehaviorButtonBuilder;
+
   @override
   State<WidgetInspector> createState() => _WidgetInspectorState();
 }
@@ -2809,6 +2835,12 @@ class _WidgetInspectorState extends State<WidgetInspector> with WidgetsBindingOb
   /// as selecting the edge of the bounding box.
   static const double _edgeHitMargin = 2.0;
 
+  ValueNotifier<bool> get _defaultInspectorTapBehaviorEnabledNotifier =>
+      WidgetsBinding.instance.debugWidgetInspectorDefaultTapBehaviorEnabledNotifier;
+
+  bool get _isSelectModeWithDefaultTapBehavior =>
+      isSelectMode && _defaultInspectorTapBehaviorEnabledNotifier.value;
+
   @override
   void initState() {
     super.initState();
@@ -2817,6 +2849,7 @@ class _WidgetInspectorState extends State<WidgetInspector> with WidgetsBindingOb
     WidgetsBinding.instance.debugShowWidgetInspectorOverrideNotifier.addListener(
       _selectionInformationChanged,
     );
+    _defaultInspectorTapBehaviorEnabledNotifier.addListener(_selectionInformationChanged);
     selection = WidgetInspectorService.instance.selection;
     isSelectMode = WidgetsBinding.instance.debugShowWidgetInspectorOverride;
   }
@@ -2827,6 +2860,7 @@ class _WidgetInspectorState extends State<WidgetInspector> with WidgetsBindingOb
     WidgetsBinding.instance.debugShowWidgetInspectorOverrideNotifier.removeListener(
       _selectionInformationChanged,
     );
+    _defaultInspectorTapBehaviorEnabledNotifier.removeListener(_selectionInformationChanged);
     super.dispose();
   }
 
@@ -2911,7 +2945,7 @@ class _WidgetInspectorState extends State<WidgetInspector> with WidgetsBindingOb
   }
 
   void _inspectAt(Offset position) {
-    if (!isSelectMode) {
+    if (!_isSelectModeWithDefaultTapBehavior) {
       return;
     }
 
@@ -2952,7 +2986,7 @@ class _WidgetInspectorState extends State<WidgetInspector> with WidgetsBindingOb
   }
 
   void _handleTap() {
-    if (!isSelectMode) {
+    if (!_isSelectModeWithDefaultTapBehavior) {
       return;
     }
     if (_lastPointerLocation != null) {
@@ -2975,11 +3009,16 @@ class _WidgetInspectorState extends State<WidgetInspector> with WidgetsBindingOb
           onPanUpdate: _handlePanUpdate,
           behavior: HitTestBehavior.opaque,
           excludeFromSemantics: true,
-          child: IgnorePointer(ignoring: isSelectMode, key: _ignorePointerKey, child: widget.child),
+          child: IgnorePointer(
+            ignoring: _isSelectModeWithDefaultTapBehavior,
+            key: _ignorePointerKey,
+            child: widget.child,
+          ),
         ),
         _InspectorOverlay(selection: selection),
         if (isSelectMode && widget.exitWidgetSelectionButtonBuilder != null)
           _ExitWidgetSelectionButtonGroup(
+            tapBehaviorButtonBuilder: widget.tapBehaviorButtonBuilder,
             exitWidgetSelectionButtonBuilder: widget.exitWidgetSelectionButtonBuilder!,
             moveExitWidgetSelectionButtonBuilder: widget.moveExitWidgetSelectionButtonBuilder,
           ),
@@ -3459,17 +3498,18 @@ class _ExitWidgetSelectionButtonGroup extends StatefulWidget {
   const _ExitWidgetSelectionButtonGroup({
     required this.exitWidgetSelectionButtonBuilder,
     required this.moveExitWidgetSelectionButtonBuilder,
+    required this.tapBehaviorButtonBuilder,
   });
 
   final ExitWidgetSelectionButtonBuilder exitWidgetSelectionButtonBuilder;
   final MoveExitWidgetSelectionButtonBuilder? moveExitWidgetSelectionButtonBuilder;
+  final TapBehaviorButtonBuilder? tapBehaviorButtonBuilder;
 
   @override
   State<_ExitWidgetSelectionButtonGroup> createState() => _ExitWidgetSelectionButtonGroupState();
 }
 
 class _ExitWidgetSelectionButtonGroupState extends State<_ExitWidgetSelectionButtonGroup> {
-  static const double _kExitWidgetSelectionButtonPadding = 4.0;
   static const double _kExitWidgetSelectionButtonMargin = 10.0;
 
   final GlobalKey _exitWidgetSelectionButtonKey = GlobalKey(
@@ -3480,31 +3520,88 @@ class _ExitWidgetSelectionButtonGroupState extends State<_ExitWidgetSelectionBut
 
   bool _leftAligned = true;
 
+  Widget? get _moveExitWidgetSelectionButton {
+    final MoveExitWidgetSelectionButtonBuilder? buttonBuilder =
+        widget.moveExitWidgetSelectionButtonBuilder;
+    if (buttonBuilder == null) {
+      return null;
+    }
+
+    final String buttonLabel = 'Move to the ${_leftAligned ? 'right' : 'left'}';
+    return _TooltipGestureDetector(
+      button: buttonBuilder(
+        context,
+        onPressed: () {
+          _changeButtonGroupAlignment();
+          _onTooltipHidden();
+        },
+        semanticLabel: buttonLabel,
+        isLeftAligned: _leftAligned,
+      ),
+      onTooltipVisible: () {
+        _changeTooltipMessage(buttonLabel);
+      },
+      onTooltipHidden: _onTooltipHidden,
+    );
+  }
+
+  Widget get _exitWidgetSelectionButton {
+    const String buttonLabel = 'Exit Select Widget mode';
+    return _TooltipGestureDetector(
+      button: widget.exitWidgetSelectionButtonBuilder(
+        context,
+        onPressed: _exitWidgetSelectionMode,
+        semanticLabel: buttonLabel,
+        key: _exitWidgetSelectionButtonKey,
+      ),
+      onTooltipVisible: () {
+        _changeTooltipMessage(buttonLabel);
+      },
+      onTooltipHidden: _onTooltipHidden,
+    );
+  }
+
+  Widget? get _tapBehaviorButton {
+    final TapBehaviorButtonBuilder? buttonBuilder = widget.tapBehaviorButtonBuilder;
+    if (buttonBuilder == null) {
+      return null;
+    }
+
+    return _TooltipGestureDetector(
+      button: buttonBuilder(
+        context,
+        onPressed: () {
+          final bool defaultTapBehaviorEnabled =
+              WidgetsBinding.instance.debugWidgetInspectorDefaultTapBehaviorEnabled;
+          WidgetsBinding.instance.debugWidgetInspectorDefaultTapBehaviorEnabled =
+              !defaultTapBehaviorEnabled;
+          WidgetInspectorService.instance.selection.clear();
+        },
+        semanticLabel: 'Change widget selection mode for taps',
+        defaultTapBehaviorEnabled:
+            WidgetsBinding.instance.debugWidgetInspectorDefaultTapBehaviorEnabled,
+      ),
+      onTooltipVisible: () {
+        final bool defaultTapBehaviorEnabled =
+            WidgetsBinding.instance.debugWidgetInspectorDefaultTapBehaviorEnabled;
+        _changeTooltipMessage(
+          defaultTapBehaviorEnabled
+              ? 'Disable widget selection for taps'
+              : 'Enable widget selection for taps',
+        );
+      },
+      onTooltipHidden: _onTooltipHidden,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final Widget? moveExitWidgetSelectionButton =
-        widget.moveExitWidgetSelectionButtonBuilder != null
-            ? Padding(
-              padding: EdgeInsets.only(
-                left: _leftAligned ? _kExitWidgetSelectionButtonPadding : 0.0,
-                right: _leftAligned ? 0.0 : _kExitWidgetSelectionButtonPadding,
-              ),
-              child: _TooltipGestureDetector(
-                button: widget.moveExitWidgetSelectionButtonBuilder!(
-                  context,
-                  onPressed: () {
-                    _changeButtonGroupAlignment();
-                    _onTooltipHidden();
-                  },
-                  isLeftAligned: _leftAligned,
-                ),
-                onTooltipVisible: () {
-                  _changeTooltipMessage('Move to the ${_leftAligned ? 'right' : 'left'}');
-                },
-                onTooltipHidden: _onTooltipHidden,
-              ),
-            )
-            : null;
+    final Widget selectionModeButtons = Column(
+      children: <Widget>[
+        if (_tapBehaviorButton != null) _tapBehaviorButton!,
+        _exitWidgetSelectionButton,
+      ],
+    );
 
     final Widget buttonGroup = Stack(
       alignment: AlignmentDirectional.topCenter,
@@ -3517,22 +3614,12 @@ class _ExitWidgetSelectionButtonGroupState extends State<_ExitWidgetSelectionBut
           ),
         ),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            if (!_leftAligned && moveExitWidgetSelectionButton != null)
-              moveExitWidgetSelectionButton,
-            _TooltipGestureDetector(
-              button: widget.exitWidgetSelectionButtonBuilder(
-                context,
-                onPressed: _exitWidgetSelectionMode,
-                key: _exitWidgetSelectionButtonKey,
-              ),
-              onTooltipVisible: () {
-                _changeTooltipMessage('Exit Select Widget mode');
-              },
-              onTooltipHidden: _onTooltipHidden,
-            ),
-            if (_leftAligned && moveExitWidgetSelectionButton != null)
-              moveExitWidgetSelectionButton,
+            if (_leftAligned) selectionModeButtons,
+            if (_moveExitWidgetSelectionButton != null) _moveExitWidgetSelectionButton!,
+            if (!_leftAligned) selectionModeButtons,
           ],
         ),
       ],
